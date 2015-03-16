@@ -13,17 +13,17 @@ SL.library <- c("SL.glm","SL.glm.interaction","SL.mean","SL.step","SL.step.inter
 n.analysis <- 10
 n.match <- 7
 
-cluster <- F
+cluster <- T
 
 # Choose number of runs: 
-index <- 1:2
+index <- 1:500
 
 # Choose data
 # Tx choices: Experimental: full, dw, dw_big, dw_big_noisy
 # Control choices: Experimental: full, dw, dw_big, dw_big_noisy 
 # Observational: cps1, cps2, cps3, psid1, psid2, psid3
 dn_tx <- "dw"  # full not working here for now
-dn_ct <- "psid3"
+dn_ct <- "psid2"
 
 if (cluster == F) {
   source("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/code/TMLE_ATT/TMLE_ATT_edited.R") 
@@ -501,14 +501,29 @@ if (cluster==T) {
 
 # Turn off slaves
 if (cluster==T) { 
+  print(head(results))
   mpi.close.Rslaves()
-  print(head(results)) 
-  #write.csv(results, paste0("many_runs_results_",dn_tx,"_",dn_ct,".csv"))
 }
 
 # Collapse results
 est <- do.call(rbind, lapply(index, function(x) results[[x]]$estimands ))
 balance <- do.call(rbind, lapply(index, function(x) results[[x]]$bal ))
+
+# Coerce everything to make sure it is a data frame and not a list, so it will write.csv properly
+est <- as.data.frame(est)
+balance <- as.data.frame(balance)
+est <- data.frame(lapply(est, as.character), stringsAsFactors=FALSE)
+balance <- data.frame(lapply(balance, as.character), stringsAsFactors=FALSE)
+
+for (i in 1:ncol(est)) {
+  print(names(est)[i])
+  print(class(est[,i]))
+}
+
+for (i in 1:ncol(balance)) {
+  print(names(balance)[i])
+  print(class(balance[,i]))
+}
 
 #results <- outer.loop(iteration = 1, pop = data, ss = nrow(data))
 
@@ -528,7 +543,7 @@ if (cluster == F) {
   write.csv(balance, paste0("lalonde_bal_",dn_tx,"_",dn_ct,".csv"))
   
 } else {
-  write.csv(est, paste0("many_runs_",dn_tx,"_",dn_ct,".csv"))  
+  write.csv(est, paste0("many_runs_",dn_tx,"_",dn_ct,".csv"))
   write.csv(balance, paste0("many_runs_bal_",dn_tx,"_",dn_ct,".csv"))
 }
 

@@ -1,10 +1,20 @@
 # Run matching and analysis procedure on lalonde data
 # Ellie Colson
-# 1/9/2015
+# 3/13/2015
+
+
+# ````````````````````````````````
+
+# THIS CODE IS NOT FINISHED
+
+# ``````````````````````````````````
+
 
 rm(list=ls())
 set.seed(1.31)
-library("Matching")
+library("parallel")
+library("doParallel")
+library("foreach")
 options(scipen=5)
 #SL.library <- c("SL.glm", "SL.glm.interaction", "SL.step", "SL.step.interaction")
 #SL.library <- c("SL.glm","SL.glm.interaction", "SL.step", "SL.step.interaction", "SL.earth", "SL.nnet", "SL.gam")
@@ -14,52 +24,34 @@ n.analysis <- 10
 n.match <- 7
 
 cluster <- T
+nCores <- 2
 
 # Choose number of runs: 
-index <- 1:500
+index <- 1:4
 
 # Choose data
 # Tx choices: Experimental: full, dw, dw_big, dw_big_noisy
 # Control choices: Experimental: full, dw, dw_big, dw_big_noisy 
 # Observational: cps1, cps2, cps3, psid1, psid2, psid3
-dn_tx <- "dw_big"  # full not working here for now
-dn_ct <- "dw_big"
+dn_tx <- "dw"  # full not working here for now
+dn_ct <- "psid3"
 
 if (cluster == F) {
-  source("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/code/TMLE_ATT/TMLE_ATT_edited.R") 
+  source("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/match_balance_code/TMLE_ATT/TMLE_ATT_edited.R") 
   setwd("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/data/lalonde/")
 } else {
   source("TMLE_ATT_edited.R") 
 }
 
-bin_sd <- function(p,n) {
-  sqrt(p*(1-p)/n)
-}
+# Function for binomial standard error
+bin_sd <- function(p,n) { sqrt(p*(1-p)/n) }
 
 # Cluster setup 
-if (cluster==T) {
-  library("Rmpi")
-  
-  # Spawn as many slaves as possible
-  mpi.spawn.Rslaves()
-  
-  # In case R exits unexpectedly, have it automatically clean up
-  # resources taken up by Rmpi (slaves, memory, etc...)
-  .Last <- function(){
-    if (is.loaded("mpi_initialize")){
-      if (mpi.comm.size(1) > 0){
-        print("Please use mpi.close.Rslaves() to close slaves.")
-        mpi.close.Rslaves()
-      }
-      print("Please use mpi.quit() to quit R")
-      .Call("mpi_finalize")
-    }
-  }
-  
-  # Tell all slaves to return a message identifying themselves
-  mpi.remote.exec(paste("I am",mpi.comm.rank(),"of",mpi.comm.size()))
+if (cluster==T) {  
+  registerDoParallel(nCores)
 }
 
+# Setup data
 if (dn_tx == "full" & dn_ct == "full") {
   data <- data.frame(read.csv("nsw_full.csv"), re74=NA)
   data <- data[,c("data_id","treat","age","education","black","hispanic","married","nodegree","re74","re75","re78")]
@@ -310,7 +302,7 @@ ESTIMATORS.weighted<- function(O) {
 #   output: parameter estimates and balance metrics: estimands, bal
 #--------
 
-outer.loop <- function(iteration, pop, ss) {
+outer.loop <- function(iteration, sample) {
   
   set.seed(as.numeric(iteration))
   
@@ -326,9 +318,6 @@ outer.loop <- function(iteration, pop, ss) {
   
   bal <- data.frame(matrix(NA,nrow=1, ncol=n.match*ncovs))
   colnames(bal)<-paste0( rep(c("all.","match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full."),each = ncovs), rep(covs, n.match) )
-  
-  # Take a random (representative) sample from the population
-  sample <- pop[sample(row.names(pop),size=ss, replace=F),]
   
   # Balance denominators
   denom <- NULL
@@ -463,48 +452,26 @@ outer.loop <- function(iteration, pop, ss) {
 }
 
 
-
 #----------------------------------------------------
 # compare different designs and different estimators
 #----------------------------------------------------
 
 # Run all the analyses and matching combinations
 if (cluster==T) { 
-  # Send all necessary info to the slaves
-  mpi.bcast.Robj2slave(ESTIMATORS)  
-  mpi.bcast.Robj2slave(ESTIMATORS.weighted)
-  mpi.bcast.Robj2slave(outer.loop)
-  mpi.bcast.Robj2slave(index)
-  mpi.bcast.Robj2slave(data)
-  mpi.bcast.Robj2slave(qmodel)
-  mpi.bcast.Robj2slave(gmodel)
-  mpi.bcast.Robj2slave(covs)
-  mpi.bcast.Robj2slave(ncovs)
-  mpi.bcast.Robj2slave(n.analysis)  
-  mpi.bcast.Robj2slave(n.match)  
-  mpi.bcast.Robj2slave(SL.library) 
-  mpi.bcast.Robj2slave(.setColnames) # These last ones are functions needed to run my edited version of tmle.att2
-  mpi.bcast.Robj2slave(.bound)
-  mpi.bcast.Robj2slave(regress)
-  mpi.bcast.Robj2slave(predict.regress)
-  mpi.bcast.Robj2slave(tmle.att2)
-  mpi.bcast.Robj2slave(print.cte)
-  mpi.bcast.Robj2slave(tmle.cte)
-  mpi.bcast.Robj2slave(tmle.nde)
-  
-  # Run our big function in parallel
-  results <- mpi.parLapply(index, outer.loop, pop = data, ss = nrow(data)) 
+  out <- foreach(i = index) %dopar% {
+    cat('Starting ', i, 'th job.\n', sep = '')
+    outSub <- outer.loop(i, pop = data)
+    cat('Finishing ', i, 'th job.\n', sep = '')
+    outSub # this will become part of the out object
+  } 
   
 } else {
-  results <- lapply(index, outer.loop, pop = data, ss = nrow(data)) 
+  results <- lapply(index, outer.loop, pop = data) 
 }
 
-# Turn off slaves
-if (cluster==T) { 
-  print(head(results))
-  mpi.close.Rslaves()
-}
-
+results <- out
+print(head(results))
+  
 # Collapse results
 est <- do.call(rbind, lapply(index, function(x) results[[x]]$estimands ))
 balance <- do.call(rbind, lapply(index, function(x) results[[x]]$bal ))
@@ -514,18 +481,6 @@ est <- as.data.frame(est)
 balance <- as.data.frame(balance)
 est <- data.frame(lapply(est, as.character), stringsAsFactors=FALSE)
 balance <- data.frame(lapply(balance, as.character), stringsAsFactors=FALSE)
-
-for (i in 1:ncol(est)) {
-  print(names(est)[i])
-  print(class(est[,i]))
-}
-
-for (i in 1:ncol(balance)) {
-  print(names(balance)[i])
-  print(class(balance[,i]))
-}
-
-#results <- outer.loop(iteration = 1, pop = data, ss = nrow(data))
 
 # Save
 if (cluster == F) {
@@ -547,6 +502,4 @@ if (cluster == F) {
   write.csv(balance, paste0("many_runs_bal_",dn_tx,"_",dn_ct,".csv"))
 }
 
-# Close
-if (cluster==T) { mpi.quit() }
-
+# END

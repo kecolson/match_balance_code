@@ -4,14 +4,19 @@
 
 rm(list = ls())
 options(scipen=10)
+library(tidyr)
+library(ggplot2)
+library(ggvis)
 n.analysis <- 10
 n.match <- 7
 
+match.methods <- c("all.","match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full.")
+an.methods <- c("unadj","iptw.att.misp","iptw.att.sl","gcomp.att.misp","gcomp.att.sl","lalonde1","lalonde2","lalonde3","tmle.att.misp.misp","tmle.att.sl")
+
 # DW- DW
 r <- read.csv("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_02/many_runs_dw_dw_est.csv")
-row.names(r) <- paste0(rep(c("all.","match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full."), each = n.analysis),
-                             c("unadj","iptw.att.misp","iptw.att.sl","gcomp.att.misp","gcomp.att.sl",
-                               "lalonde1","lalonde2","lalonde3","tmle.att.misp.misp","tmle.att.sl"))
+row.names(r) <- paste0(rep(match.methods, each = n.analysis),
+                       an.methods)
 r <- as.data.frame(r)
 r <- r[!row.names(r) %in% paste0(rep(c("match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full."), each = 2),c("iptw.att.misp","iptw.att.sl")),]
 r <- as.data.frame(r)
@@ -27,11 +32,10 @@ dev.off()
 
 # by match method
 pdf("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_02/distributions_of_estimates_by_match.pdf", height = 5, width = 8)
-for (m in c("all.","match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full.")) {
+for (m in match.methods) {
   if (m=="all.") par(mfrow = c(3,4), mar=c(3,2,2,1))
   if (m!="all.") par(mfrow = c(3,3), mar=c(3,2,2,1))
-  for (a in c("unadj","iptw.att.misp","iptw.att.sl","gcomp.att.misp","gcomp.att.sl",
-                               "lalonde1","lalonde2","lalonde3","tmle.att.misp.misp","tmle.att.sl")) {
+  for (a in an.methods) {
     if (m!="all." & (a=="iptw.att.misp" | a=="iptw.att.sl")) next
     temp <- round(as.numeric(r[row.names(r)==paste0(m,a),]),6)
     dim <- min(c(30,length(unique(temp))))
@@ -74,10 +78,11 @@ summ3$sum <- paste0("range: ",round(summ3$min),"-",round(summ3$max),", mean: ",r
 write.csv(summ3, "C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_02/compiled.csv")
 
 
-# PSID1, 2
+# PSID1, 2, 3
 
 r <- read.csv("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_06/many_runs_dw_psid1.csv")
 r <- read.csv("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_06/many_runs_dw_psid2.csv")
+r <- read.csv("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_11/many_runs_dw_psid3.csv")
 
 compile2 <- function(X) {
   min <- min(X, na.rm = T)
@@ -95,9 +100,36 @@ row.names(summ2) <- c("min","max","mean","sd","summ")
 summ2 <- as.data.frame(t(summ2))
 summ2$summ[round(as.numeric(as.character(summ2$sd))) == 0] <- as.character(round(as.numeric(as.character(summ2$mean))))[round(as.numeric(as.character(summ2$sd))) == 0]
 
-write.csv(summ2, "C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_06/compiled_psid2.csv")
+write.csv(summ2, "C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_11/compiled_psid3.csv")
 
+# Plot distributions
+r <- r[,2:ncol(r)] # Drop row names variable
+r2 <- gather(r, method, est, all.unadj:match.full.tmle.att.sl) # Reshape long
+r2$match <- r2$an <- "" # Split match method and analysis method
+for (i in match.methods) {
+  r2$match[grep(i, r2$method)] <- i
+  r2$an   [grep(i, r2$method)] <- rep(an.methods, each = 500)
+}
+r2 <- r2[!(r2$method %in% paste0(rep(c("match.nn.","match.opt.","match.sl.","match.gen.","match.sub.","match.full."), each = 2),c("iptw.att.misp","iptw.att.sl"))),] # Drop rows corresponding to matching + IPTW, because we would never do this
+r2$an <- ordered(r2$an, levels = an.methods) # Make analysis method into an ordered factor
+r2 <- r2[!is.na(r2$est),]
+r2$est <- round(r2$est,2)
 
-
-
+for (i in match.methods[match.methods!="match.opt."]) {
+  temp <- r2[grep(i, r2$method),]
+  for (j in an.methods) {
+    if (dim(table(temp$est[temp$an == j]))==1) temp <- temp[temp$an!=j,]
+  }
+  p <- ggplot(temp, aes(x = est, colour = an)) + geom_density(size = 1) + ggtitle(i)
+  if (i == "all.") { plots <- list(p) } else { plots <- list(plots, p) }
+  ggsave(paste0("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_11/dist_psid3_",i,"jpg"), height = 5, width = 8)
+} 
   
+
+temp <- r2[grep("all.", r2$method),]
+p1 <- ggplot(temp, aes(x = est, colour = an)) + geom_density(size = 1) + ggtitle("All data")
+  ggsave(paste0("C:/Users/kecolson/Google Drive/simulation/questions and tests/match_balance_and_mse/results/lalonde/2015_03_11/dist_psid3_",i,"jpg"), height = 5, width = 8)
+
+
+
+
